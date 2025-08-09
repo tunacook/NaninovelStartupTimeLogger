@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
     "com.elringus.naninovel": "git+ssh://git@github.com/naninovel/upm.git#1.20",
     "com.unity.collab-proxy": "2.8.2",
     "com.unity.feature.2d": "2.0.1",

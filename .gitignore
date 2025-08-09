@@ -113,3 +113,7 @@ InitTestScene*.unity*
 
 *Thumbs.db*
 *.DS_Store*
+
+# Naninovel
+/[Aa]ssets/NaninovelData*
+/[Aa]ssets/Scenario*

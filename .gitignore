@@ -12,6 +12,13 @@
 /[Uu]ser[Ss]ettings/
 *.log
 
+/[Aa]ssembly-CSharp-Editor.csproj.meta
+/[Tt]emp.meta
+/[Ll]ogs.meta
+/[Nn]aninovelSaveDataInspector.sln.meta
+/[Uu]serSettings.meta
+/[Oo]bj.meta
+
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be commited to version control.
 *.blend1
 *.blend1.meta
@@ -97,3 +104,12 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+
+.idea/**/workspace.xml
+.idea/**/**/workspace.xml
+.idea/**/usage.statistics.xml
+.idea/**/tasks.xml
+
+*Thumbs.db*
+*.DS_Store*

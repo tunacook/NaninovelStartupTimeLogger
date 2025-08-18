@@ -8,40 +8,37 @@ namespace NaninovelStartupTimeLogger
     [InitializeAtRuntime]
     public class StartupTimeLogger : IEngineService
     {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    private static Stopwatch stopwatch = new Stopwatch();
-    private static bool isFirstLog = true;
-#endif
-
-          public UniTask InitializeService ()
-          {
+        private static readonly Stopwatch Stopwatch = new Stopwatch();
+        private static bool _isFirstLog = true;
+        public UniTask InitializeService ()
+        {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
 
-              stopwatch.Start();
+            Stopwatch.Start();
 #endif
-              return UniTask.CompletedTask;
-          }
+            return UniTask.CompletedTask;
+        }
 
-         public void ResetService () { }
-         public void DestroyService () { }
-         public static void Log (string message)
-         {
-             if (isFirstLog)
-             {
+        public void ResetService () { }
+        public void DestroyService () { }
+        public static void Log (string message)
+        {
+            if (_isFirstLog)
+            {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
 
-                 stopwatch.Stop();
-                 Debug.Log($"[StartupTime] {message} at {stopwatch.Elapsed.TotalSeconds:F3} seconds.");
+                Stopwatch.Stop();
+                Debug.Log($"[StartupTime] {message} at {Stopwatch.Elapsed.TotalSeconds:F3} seconds.");
 #endif
-             }
-             isFirstLog = false;
-         }
+            }
+            _isFirstLog = false;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSplashScreen)]
         private static void OnBeforeSplashScreen ()
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-        Debug.Log("Application Startup");
+            Debug.Log("[StartupTime] Application Startup");
 #endif
         }
     }

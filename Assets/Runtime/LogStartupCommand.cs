@@ -1,18 +1,16 @@
 using Naninovel;
-using UnityEngine;
 
 namespace NaninovelStartupTimeLogger
 {
     [CommandAlias("logStartup")]
-	public class LogStartupCommand : Command
-	{
-		public override UniTask Execute (AsyncToken token = default)
-    	{
-		    Debug.Log("Naninovel Script Executed");
+    public class LogStartupCommand : Command
+    {
+        public override UniTask Execute (AsyncToken token = default)
+        {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-	StartupTimeLogger.Log("Naninovel Script Executed");
+            StartupTimeLogger.Log("[StartupTime] Naninovel Script Executed");
 #endif
-		    return UniTask.CompletedTask;
-    	}
-	}
+            return UniTask.CompletedTask;
+        }
+    }
 }

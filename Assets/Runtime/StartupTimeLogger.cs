@@ -24,6 +24,7 @@ namespace NaninovelStartupTimeLogger
         private bool sawInitialize, wasPlaying, endLogged;
         private string lastScriptName;
         private float elapsed;
+        private string initScriptId; // 正規化済みの初回スクリプトIDを保持
 
         /// <summary>診断の詳細ログ（時間は出さない）</summary>
         public static bool Verbose = false;
@@ -112,22 +113,16 @@ namespace NaninovelStartupTimeLogger
                 var currentName = SafeGetPlayedScriptName(player);
                 var isPlaying   = SafeGetIsPlaying(player);
 
-                if (Verbose && (currentName != lastScriptName || isPlaying != wasPlaying))
+                if (!sawInitialize && isPlaying && !string.IsNullOrEmpty(currentName))
                 {
-                    UnityEngineDebug.Log(
-                        $"[StartupTimeLogger] state change: isPlaying={isPlaying}, script='{currentName}' (norm='{NormalizeScriptId(currentName)}')"
-                    );
-                }
-
-                if (!sawInitialize && isPlaying && IsInitialize(currentName))
-                {
+                    initScriptId = NormalizeScriptId(currentName);
                     sawInitialize = true;
-                    if (Verbose) UnityEngineDebug.Log($"[StartupTimeLogger] initialize detected. (raw='{currentName}')");
+                    if (Verbose) UnityEngineDebug.Log($"[StartupTimeLogger] initialize locked to '{initScriptId}'");
                 }
 
                 bool leftInitialize =
                     (sawInitialize && wasPlaying && !isPlaying) ||
-                    (sawInitialize && isPlaying && IsInitialize(lastScriptName) && !IsInitialize(currentName));
+                    (sawInitialize && isPlaying && NormalizeScriptId(lastScriptName) == initScriptId && NormalizeScriptId(currentName) != initScriptId);
 
                 if (leftInitialize)
                 {

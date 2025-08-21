@@ -6,27 +6,32 @@ using UnityEngine.Scripting;
 using UnityEditor;
 #endif
 
+// 衝突回避エイリアス
 using SysStopwatch = System.Diagnostics.Stopwatch;
 using UnityEngineDebug = UnityEngine.Debug;
 
 namespace NaninovelStartupTimeLogger
 {
     /// <summary>
-    /// Splash前(BeforeSplashScreen) → initialize.nani 終了までを測定。
-    /// 経過時間は終了時(LogEnd)のみ出力。Editor/Development Build のみ動作。
+    /// Splash前(BeforeSplashScreen) → 「最初に再生されたスクリプト」終了までの時間を計測。
+    /// 経過時間の表示は終了時(LogEnd)のみ。Editor または Development Build でのみ動作。
+    /// プロジェクト側の改変は不要。
     /// </summary>
     public sealed class StartupTimeLogger : MonoBehaviour
     {
+        private const float HardTimeoutSeconds = 180f; // フェイルセーフ
         private static readonly SysStopwatch Stopwatch = new SysStopwatch();
-        private const float HardTimeoutSeconds = 180f;
 
+        // 状態
         private IScriptPlayer player;
-        private bool sawInitialize, wasPlaying, endLogged;
+        private bool wasPlaying, endLogged, sawInitialize;
         private string lastScriptName;
         private float elapsed;
-        private string initScriptId; // 正規化済みの初回スクリプトIDを保持
 
-        /// <summary>診断の詳細ログ（時間は出さない）</summary>
+        // 「初回に再生されたスクリプトID（正規化済み）」を initialize 扱いとしてロック
+        private string initScriptId;
+
+        /// <summary>診断用詳細ログ（時間は出さない）</summary>
         public static bool Verbose = false;
 
         private static bool _armed;
@@ -39,7 +44,7 @@ namespace NaninovelStartupTimeLogger
 #endif
         ;
 
-        // ───────── 起点（ドメインリロード有りで呼ばれる） ─────────
+        // ───────── 起点（ドメインリロード有り環境で呼ばれる） ─────────
         [Preserve]
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSplashScreen)]
         private static void BeforeSplash()
@@ -83,7 +88,7 @@ namespace NaninovelStartupTimeLogger
             if (_armed) return;
             _armed = true;
             Stopwatch.Restart();
-            UnityEngineDebug.Log(msg); // ← ここでは時間を出さない
+            UnityEngineDebug.Log(msg); // ← 時間はここでは出さない
         }
 
         private void Start()
@@ -94,7 +99,7 @@ namespace NaninovelStartupTimeLogger
 
         private System.Collections.IEnumerator Watch()
         {
-            // Naninovel IScriptPlayer 取得待ち
+            // Naninovel の IScriptPlayer 取得待ち
             IScriptPlayer local = null;
             while (local == null)
             {
@@ -104,7 +109,7 @@ namespace NaninovelStartupTimeLogger
             }
             player = local;
 
-            UnityEngineDebug.Log("[StartupTimeLogger] Naninovel Engine ready."); // 時間は出さない
+            UnityEngineDebug.Log("[StartupTimeLogger] Naninovel Engine ready."); // ← 時間は出さない
 
             while (!endLogged)
             {
@@ -113,6 +118,15 @@ namespace NaninovelStartupTimeLogger
                 var currentName = SafeGetPlayedScriptName(player);
                 var isPlaying   = SafeGetIsPlaying(player);
 
+                // 状態変化の可視化（Verbose時のみ・時間は出さない）
+                if (Verbose && (currentName != lastScriptName || isPlaying != wasPlaying))
+                {
+                    UnityEngineDebug.Log(
+                        $"[StartupTimeLogger] state change: isPlaying={isPlaying}, script='{currentName}' (norm='{NormalizeScriptId(currentName)}')"
+                    );
+                }
+
+                // 初回に再生されたスクリプト名を「initialize扱い」としてロック
                 if (!sawInitialize && isPlaying && !string.IsNullOrEmpty(currentName))
                 {
                     initScriptId = NormalizeScriptId(currentName);
@@ -120,9 +134,15 @@ namespace NaninovelStartupTimeLogger
                     if (Verbose) UnityEngineDebug.Log($"[StartupTimeLogger] initialize locked to '{initScriptId}'");
                 }
 
+                // 終了条件：
+                //  1) 再生が停止した（wasPlaying → !isPlaying）
+                //  2) initScriptId から別スクリプトへ切り替わった
                 bool leftInitialize =
                     (sawInitialize && wasPlaying && !isPlaying) ||
-                    (sawInitialize && isPlaying && NormalizeScriptId(lastScriptName) == initScriptId && NormalizeScriptId(currentName) != initScriptId);
+                    (sawInitialize && isPlaying &&
+                     !string.IsNullOrEmpty(initScriptId) &&
+                     NormalizeScriptId(lastScriptName) == initScriptId &&
+                     NormalizeScriptId(currentName)   != initScriptId);
 
                 if (leftInitialize)
                 {
@@ -130,10 +150,12 @@ namespace NaninovelStartupTimeLogger
                     yield break;
                 }
 
+                // タイムアウト（フェイルセーフ）
                 if (elapsed >= HardTimeoutSeconds)
                 {
                     if (Verbose)
-                        UnityEngineDebug.LogWarning($"[StartupTimeLogger] timeout before detecting initialize end. last='{lastScriptName}', current='{currentName}', isPlaying={isPlaying}");
+                        UnityEngineDebug.LogWarning(
+                            $"[StartupTimeLogger] timeout before detecting initialize end. last='{lastScriptName}', current='{currentName}', isPlaying={isPlaying}, init='{initScriptId}'");
                     LogEnd("init_script_end_timeout");
                     yield break;
                 }
@@ -161,7 +183,7 @@ namespace NaninovelStartupTimeLogger
                 var played = p?.PlayedScript;
                 if (played == null) return null;
 
-                // 1) PlayedScript.ScriptName があれば使う（実行時反射）
+                // 1) PlayedScript.ScriptName があれば使用（反射で安全に）
                 var t = played.GetType();
                 var propScriptName = t.GetProperty("ScriptName");
                 if (propScriptName != null)
@@ -200,7 +222,5 @@ namespace NaninovelStartupTimeLogger
             if (dot >= 0) last = last.Substring(0, dot);
             return last.ToLowerInvariant();
         }
-
-        private static bool IsInitialize(string raw) => NormalizeScriptId(raw) == "initialize";
     }
 }

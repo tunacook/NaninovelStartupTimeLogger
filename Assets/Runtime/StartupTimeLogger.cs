@@ -1,45 +1,178 @@
-using UnityEngine;
 using System.Diagnostics;
+using UnityEngine;
 using Naninovel;
-using Debug = UnityEngine.Debug;
+using UnityEngine.Scripting;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace NaninovelStartupTimeLogger
 {
-    [InitializeAtRuntime]
-    public class StartupTimeLogger : IEngineService
+    /// <summary>
+    /// Splash 前 → initialize.nani 終了までを計測してログ出力。
+    /// Editor / Development Build のみ動作。Editor ではドメインリロード無しでも武装する。
+    /// </summary>
+    public sealed class StartupTimeLogger : MonoBehaviour
     {
         private static readonly Stopwatch Stopwatch = new Stopwatch();
-        private static bool _isFirstLog = true;
-        public UniTask InitializeService ()
-        {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private const string InitializeScriptName = "initialize";
 
-            Stopwatch.Start();
+        private IScriptPlayer player;
+        private bool sawInitialize, wasPlaying, endLogged;
+        private string lastScriptName;
+        private const float HardTimeoutSeconds = 180f;
+        private float elapsed;
+
+        private static bool _armed; // BeforeSplash or Editorフックで武装済みか
+
+        private static bool ShouldRun =>
+#if UNITY_EDITOR
+            true
+#else
+            Debug.isDebugBuild
 #endif
-            return UniTask.CompletedTask;
-        }
+        ;
 
-        public void ResetService () { }
-        public void DestroyService () { }
-        public static void Log (string message)
-        {
-            if (_isFirstLog)
-            {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-
-                Stopwatch.Stop();
-                Debug.Log($"[StartupTime] {message} at {Stopwatch.Elapsed.TotalSeconds:F3} seconds.");
-#endif
-            }
-            _isFirstLog = false;
-        }
-
+        // ─── 起点（ランタイム：ドメインリロード有りで呼ばれる） ───
+        [Preserve]
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSplashScreen)]
-        private static void OnBeforeSplashScreen ()
+        private static void BeforeSplash()
         {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-            Debug.Log("[StartupTime] Application Startup");
+            if (!ShouldRun) return;
+            ArmOnce("[StartupTimeLogger] armed (BeforeSplashScreen)");
+        }
+
+        // ─── 常駐（ランタイム） ───
+        [Preserve]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Install()
+        {
+            if (!ShouldRun) return;
+            var go = new GameObject("[StartupTimeLogger]");
+            Object.DontDestroyOnLoad(go);
+            go.AddComponent<StartupTimeLogger>();
+        }
+
+#if UNITY_EDITOR
+        // ─── Editorフック：ドメインリロード無し（Reload Domain Off）でも再生直前に武装 ───
+        [InitializeOnLoadMethod]
+        private static void EditorHook()
+        {
+            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
+            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+        }
+
+        private static void OnPlayModeStateChanged(PlayModeStateChange change)
+        {
+            // 再生「開始直前」で武装（ドメイン未リロードでもここは呼ばれる）
+            if (change == PlayModeStateChange.ExitingEditMode)
+            {
+                if (!ShouldRun) return;
+                ArmOnce("[StartupTimeLogger] armed (Editor hook)");
+            }
+        }
 #endif
+
+        private static void ArmOnce(string msg)
+        {
+            if (_armed) return;
+            _armed = true;
+            Stopwatch.Restart();
+            UnityEngine.Debug.Log(msg);
+        }
+
+        private void Start()
+        {
+            if (!ShouldRun) { enabled = false; return; }
+            StartCoroutine(Watch());
+        }
+
+        private System.Collections.IEnumerator Watch()
+        {
+            // Naninovel初期化待ち
+            IScriptPlayer localPlayer = null;
+            while (localPlayer == null)
+            {
+                try { localPlayer = Engine.GetService<IScriptPlayer>(); }
+                catch { /* 初期化前 */ }
+                yield return null;
+            }
+            player = localPlayer;
+
+            UnityEngine.Debug.Log("[StartupTimeLogger] Naninovel Engine ready.");
+
+            while (!endLogged)
+            {
+                elapsed += Time.unscaledDeltaTime;
+
+                var currentName = SafeGetPlayedScriptName(player);
+                var isPlaying   = SafeGetIsPlaying(player);
+
+                if (!sawInitialize && isPlaying && currentName == InitializeScriptName)
+                    sawInitialize = true;
+
+                if (sawInitialize &&
+                    ((!isPlaying && wasPlaying) ||
+                     (isPlaying && lastScriptName == InitializeScriptName && currentName != InitializeScriptName)))
+                {
+                    LogEnd("init_script_end");
+                    yield break;
+                }
+
+                if (elapsed >= HardTimeoutSeconds)
+                {
+                    LogEnd("init_script_end_timeout");
+                    yield break;
+                }
+
+                lastScriptName = currentName;
+                wasPlaying     = isPlaying;
+                yield return null;
+            }
+        }
+
+        private void LogEnd(string tag)
+        {
+            if (endLogged) return;
+            endLogged = true;
+            var totalMs = Stopwatch.Elapsed.TotalMilliseconds;
+            UnityEngine.Debug.Log($"[StartupTimeLogger] {tag} at {totalMs:F1} ms (from armed).");
+        }
+
+        private static string SafeGetPlayedScriptName(IScriptPlayer p)
+        {
+            try
+            {
+                var played = p?.PlayedScript;
+                if (played == null) return null;
+
+                // 1) PlayedScript.ScriptName （あれば）
+                var t = played.GetType();
+                var propScriptName = t.GetProperty("ScriptName");
+                if (propScriptName != null)
+                {
+                    var s = propScriptName.GetValue(played) as string;
+                    if (!string.IsNullOrEmpty(s)) return s;
+                }
+                // 2) PlayedScript.Script.Name
+                var propScript = t.GetProperty("Script");
+                var scriptObj  = propScript?.GetValue(played);
+                if (scriptObj != null)
+                {
+                    var propName = scriptObj.GetType().GetProperty("Name");
+                    var s = propName?.GetValue(scriptObj) as string;
+                    if (!string.IsNullOrEmpty(s)) return s;
+                }
+                return null;
+            }
+            catch { return null; }
+        }
+
+        private static bool SafeGetIsPlaying(IScriptPlayer p)
+        {
+            try { return p != null && p.Playing; }
+            catch { return false; }
         }
     }
 }

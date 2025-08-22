@@ -1,0 +1,14 @@
+<linker>
+    <!-- このパッケージのクラスを保持 -->
+    <assembly fullname="com.tunacook.naninovelstartuptimelogger">
+        <type fullname="NaninovelStartupTimeLogger.StartupTimeLogger" preserve="all"/>
+    </assembly>
+
+    <!-- Naninovel 側で反射する型/プロパティを保持 -->
+    <assembly fullname="Elringus.Naninovel.Runtime">
+        <type fullname="Naninovel.PlayedScript" preserve="all"/>
+        <type fullname="Naninovel.Script" preserve="all"/>
+        <type fullname="Naninovel.ScriptPlayer" preserve="all"/>
+        <type fullname="Naninovel.IScriptPlayer" preserve="all"/>
+    </assembly>
+</linker>

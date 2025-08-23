@@ -51,6 +51,14 @@ IL2CPP でも動作。[Preserve] を付与済みです（もしストリッピ�
 [StartupTimeLogger] init_script_end (t=5092.3 ms)
 ```
 
+## 仕組み
+
+- BeforeSplashScreen でストップウォッチ開始 → 最速で監視オブジェクトを設置
+- IScriptPlayer.PlayedScript から 最初に観測できたスクリプト ID をロック
+- 以降、停止または別スクリプトに切り替わった瞬間を「初回スクリプトの終了」とみなして経過時間(ms)を出力
+  - 秒変換しても良いけどマイクロ秒で充分だろう 
+- 取りこぼし低減のため Update と EndOfFrame の二重チェックを実施
+
 ## トラブルシューティング
 
 ### ログが出ない（実機/プレイヤー）

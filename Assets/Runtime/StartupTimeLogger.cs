@@ -1,6 +1,7 @@
 using UnityEngine;
 using Naninovel;
 using UnityEngine.Scripting;
+using System.Threading;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -25,7 +26,7 @@ namespace NaninovelStartupTimeLogger
         public  static bool  Verbose        = false;
 
         private static readonly SysStopwatch Stopwatch = new SysStopwatch();
-        private static bool _armed;
+        private static int sArmedFlag = 0;   // 0=未武装, 1=武装済み
 
         private IScriptPlayer player;
         private bool wasPlaying, endLogged, sawInitialize;
@@ -89,7 +90,7 @@ namespace NaninovelStartupTimeLogger
         private void OnApplicationQuit()
         {
             // 最後の保険：まだ出していなければここで時間を出す
-            if (!endLogged && _armed) LogEnd("init_script_end_on_quit");
+            if (!endLogged && sArmedFlag==0) LogEnd("init_script_end_on_quit");
         }
 
         private System.Collections.IEnumerator Watch()
@@ -175,12 +176,9 @@ namespace NaninovelStartupTimeLogger
         {
             if (endLogged) return;
             endLogged = true;
+
             var ms = Stopwatch.Elapsed.TotalMilliseconds;
-            var line = $"[StartupTimeLogger] {tag} (t={ms:F1} ms)";
-            UnityEngineDebug.Log(line);
-#if DEVELOPMENT_BUILD && !UNITY_EDITOR
-    UnityEngine.Debug.LogWarning(line + " [dup]");
-#endif
+            UnityEngineDebug.Log($"[StartupTimeLogger] {tag} (t={ms:F1} ms)");
         }
 
         // --- ヘルパー（1.20 反射フォールバック） ---
@@ -231,16 +229,18 @@ namespace NaninovelStartupTimeLogger
         }
 
         // ArmOnce の最後でロガー状態を Warning で可視化（デバッグ用）
-        private static void ArmOnce(string msg)
+        private static void ArmOnce(string source)
         {
-            if (_armed) return;
-            _armed = true;
-            Stopwatch.Restart();
-            UnityEngineDebug.Log($"{msg} [v{Version}]");
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+            // 既に武装済みなら何もしない（多重ログ防止）
+            if (Interlocked.Exchange(ref sArmedFlag, 1) == 1)
+                return;
 
-#if DEVELOPMENT_BUILD && !UNITY_EDITOR
-    UnityEngineDebug.LogWarning(
-        $"[StartupTimeLogger] logger state: enabled={UnityEngineDebug.unityLogger.logEnabled}, filter={UnityEngineDebug.unityLogger.filterLogType}");
+            Stopwatch.Restart();
+            UnityEngineDebug.Log($"[StartupTimeLogger] armed ({source}) [v{Version}]");
+
+            var logger = UnityEngineDebug.unityLogger;
+            UnityEngineDebug.Log($"[StartupTimeLogger] logger state: enabled={logger.logEnabled}, filter={logger.filterLogType}");
 #endif
         }
 

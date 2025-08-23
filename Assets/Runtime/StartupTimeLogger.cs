@@ -1,7 +1,6 @@
 using UnityEngine;
 using Naninovel;
 using UnityEngine.Scripting;
-using System.Threading;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -20,13 +19,12 @@ namespace NaninovelStartupTimeLogger
     [Preserve] // クラスごと保持（IL2CPP対策）
     public sealed class StartupTimeLogger : MonoBehaviour
     {
-        private const string Version        = "0.2.0";
         private const float  HardTimeoutSec = 30f; // 最終フェイルセーフ
         private const float  GraceLockSec   = 3f;  // Engine ready 後、ここまでにロックできなければ fastpath
         public  static bool  Verbose        = false;
 
         private static readonly SysStopwatch Stopwatch = new SysStopwatch();
-        private static int sArmedFlag = 0;   // 0=未武装, 1=武装済み
+        private static volatile bool sArmed = false;
 
         private IScriptPlayer player;
         private bool wasPlaying, endLogged, sawInitialize;
@@ -90,7 +88,7 @@ namespace NaninovelStartupTimeLogger
         private void OnApplicationQuit()
         {
             // 最後の保険：まだ出していなければここで時間を出す
-            if (!endLogged && sArmedFlag==0) LogEnd("init_script_end_on_quit");
+            if (!endLogged && sArmed) LogEnd("init_script_end_on_quit");
         }
 
         private System.Collections.IEnumerator Watch()
@@ -233,11 +231,11 @@ namespace NaninovelStartupTimeLogger
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             // 既に武装済みなら何もしない（多重ログ防止）
-            if (Interlocked.Exchange(ref sArmedFlag, 1) == 1)
-                return;
+            if (sArmed) return;
+            sArmed = true;
 
             Stopwatch.Restart();
-            UnityEngineDebug.Log($"[StartupTimeLogger] armed ({source}) [v{Version}]");
+            UnityEngineDebug.Log($"[StartupTimeLogger] armed ({source})");
 
             var logger = UnityEngineDebug.unityLogger;
             UnityEngineDebug.Log($"[StartupTimeLogger] logger state: enabled={logger.logEnabled}, filter={logger.filterLogType}");

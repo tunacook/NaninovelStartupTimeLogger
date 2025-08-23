@@ -53,11 +53,11 @@ IL2CPP でも動作。[Preserve] を付与済みです（もしストリッピ�
 
 ## 仕組み
 
-- BeforeSplashScreen でストップウォッチ開始 → 最速で監視オブジェクトを設置
-- IScriptPlayer.PlayedScript から 最初に観測できたスクリプト ID をロック
+- BeforeSplashScreen でストップウォッチ開始 → 監視オブジェクトを設置
+- IScriptPlayer.PlayedScriptから最初に観測できたスクリプトIDをロック
 - 以降、停止または別スクリプトに切り替わった瞬間を「初回スクリプトの終了」とみなして経過時間(ms)を出力
   - 秒変換しても良いけどマイクロ秒で充分だろう 
-- 取りこぼし低減のため Update と EndOfFrame の二重チェックを実施
+- 取りこぼし低減のためUpdateとEndOfFrameの二重チェック
 
 ## トラブルシューティング
 

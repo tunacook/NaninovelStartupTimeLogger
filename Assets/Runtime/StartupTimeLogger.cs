@@ -21,16 +21,15 @@ namespace NaninovelStartupTimeLogger
     {
         private const float  HardTimeoutSec = 30f; // 最終フェイルセーフ
         private const float  GraceLockSec   = 3f;  // Engine ready 後、ここまでにロックできなければ fastpath
-        public  static bool  Verbose        = false;
 
         private static readonly SysStopwatch Stopwatch = new SysStopwatch();
-        private static volatile bool sArmed = false;
+        private static volatile bool _sArmed;
 
-        private IScriptPlayer player;
-        private bool wasPlaying, endLogged, sawInitialize;
-        private string lastScriptName;
-        private string initScriptId; // 正規化済みの初回スクリプトID
-        private float  readyRealtime;
+        private IScriptPlayer _player;
+        private bool _wasPlaying, _endLogged, _sawInitialize;
+        private string _lastScriptName;
+        private string _initScriptId; // 正規化済みの初回スクリプトID
+        private float  _readyRealtime;
 
         // ★ 実行条件は“コンパイル時”に固定（Devビルドで確実にtrue）
         private static bool ShouldRun =>
@@ -47,7 +46,7 @@ namespace NaninovelStartupTimeLogger
         private static void BeforeSplash()
         {
             if (!ShouldRun) return;
-            ArmOnce("[StartupTimeLogger] armed (BeforeSplashScreen)");
+            ArmOnce("BeforeSplashScreen");
         }
 
         // ---- できるだけ早く常駐設置（BeforeSceneLoad）----
@@ -74,7 +73,7 @@ namespace NaninovelStartupTimeLogger
             if (change == PlayModeStateChange.ExitingEditMode)
             {
                 if (!ShouldRun) return;
-                ArmOnce("[StartupTimeLogger] armed (Editor hook)");
+                ArmOnce("EditorHook");
             }
         }
 #endif
@@ -88,7 +87,7 @@ namespace NaninovelStartupTimeLogger
         private void OnApplicationQuit()
         {
             // 最後の保険：まだ出していなければここで時間を出す
-            if (!endLogged && sArmed) LogEnd("init_script_end_on_quit");
+            if (!_endLogged && _sArmed) LogEnd("init_script_end_on_quit");
         }
 
         private System.Collections.IEnumerator Watch()
@@ -105,17 +104,17 @@ namespace NaninovelStartupTimeLogger
 
             if (local == null) { LogEnd("engine_not_ready_timeout"); yield break; }
 
-            player        = local;
-            readyRealtime = Time.realtimeSinceStartup;
-            UnityEngineDebug.Log("[StartupTimeLogger] Naninovel Engine ready."); // 時間は出さない
+            _player         = local;
+            _readyRealtime = Time.realtimeSinceStartup;
+            UnityEngineDebug.Log("[StartupTimeLogger] ENGINE_READY");
 
             // 監視ループ（EndOfFrame ダブルチェックで取りこぼし低減）
-            while (!endLogged)
+            while (!_endLogged)
             {
                 TickDetection();
 
                 yield return new WaitForEndOfFrame();
-                if (endLogged) yield break;
+                if (_endLogged) yield break;
 
                 TickDetection();
                 yield return null;
@@ -124,56 +123,52 @@ namespace NaninovelStartupTimeLogger
 
         private void TickDetection()
         {
-            var elapsedSinceReady = Time.realtimeSinceStartup - readyRealtime;
+            var elapsedSinceReady = Time.realtimeSinceStartup - _readyRealtime;
 
-            var currentName = SafeGetPlayedScriptName(player);
-            var isPlaying   = SafeGetIsPlaying(player);
+            var currentName = SafeGetPlayedScriptName(_player);
+            var isPlaying   = SafeGetIsPlaying(_player);
 
-            if (Verbose && (currentName != lastScriptName || isPlaying != wasPlaying))
-            {
-                UnityEngineDebug.Log(
-                    $"[StartupTimeLogger] state change: isPlaying={isPlaying}, script='{currentName}' (norm='{Normalize(currentName)}')");
-            }
+            // Verbose: 状態変化のたびに出す（Conditional なのでシンボル未定義ならビルドされない）
+            if (currentName != _lastScriptName || isPlaying != _wasPlaying)
+                VLog($"[StartupTimeLogger] STATE playing={isPlaying} | script='{currentName}' | norm='{Normalize(currentName)}'");
 
             // 1) 初回に観測できたスクリプトをロック（isPlaying に依らず）
-            if (!sawInitialize && !string.IsNullOrEmpty(currentName))
+            if (!_sawInitialize && !string.IsNullOrEmpty(currentName))
             {
-                initScriptId  = Normalize(currentName);
-                sawInitialize = true;
-                if (Verbose) UnityEngineDebug.Log($"[StartupTimeLogger] initialize locked to '{initScriptId}'");
+                _initScriptId  = Normalize(currentName);
+                _sawInitialize = true;
+                VLog($"[StartupTimeLogger] INIT_LOCKED id='{_initScriptId}'");
             }
 
             // 2) 終了：停止 or initScriptId から別スクリプトへ遷移
             bool leftInitialize =
-                (sawInitialize && wasPlaying && !isPlaying) ||
-                (sawInitialize &&
-                 Normalize(lastScriptName) == initScriptId &&
-                 Normalize(currentName)    != initScriptId);
+                (_sawInitialize && _wasPlaying && !isPlaying) ||
+                (_sawInitialize &&
+                 Normalize(_lastScriptName) == _initScriptId &&
+                 Normalize(currentName)    != _initScriptId);
 
             if (leftInitialize) { LogEnd("init_script_end"); return; }
 
             // 3) fastpath：Engine ready 後、一定時間ロックできない＝既に終わっていた
-            if (!sawInitialize && elapsedSinceReady >= GraceLockSec) { LogEnd("init_script_end_fastpath"); return; }
+            if (!_sawInitialize && elapsedSinceReady >= GraceLockSec) { LogEnd("init_script_end_fastpath"); return; }
 
             // 4) timeout：どれでもない
             if (elapsedSinceReady >= HardTimeoutSec)
             {
-                if (Verbose)
-                    UnityEngineDebug.LogWarning(
-                        $"[StartupTimeLogger] timeout. last='{lastScriptName}', current='{currentName}', isPlaying={isPlaying}, init='{initScriptId}'");
+                VWarn($"[StartupTimeLogger] TIMEOUT_INFO last='{_lastScriptName}' | current='{currentName}' | playing={isPlaying} | init='{_initScriptId}'");
                 LogEnd("init_script_end_timeout");
                 return;
             }
 
-            lastScriptName = currentName;
-            wasPlaying     = isPlaying;
+            _lastScriptName = currentName;
+            _wasPlaying     = isPlaying;
         }
 
         /// <summary>終了時のみ、経過msを出力。</summary>
         private void LogEnd(string tag)
         {
-            if (endLogged) return;
-            endLogged = true;
+            if (_endLogged) return;
+            _endLogged = true;
 
             var ms = Stopwatch.Elapsed.TotalMilliseconds;
             UnityEngineDebug.Log($"[StartupTimeLogger] {tag} (t={ms:F1} ms)");
@@ -216,29 +211,25 @@ namespace NaninovelStartupTimeLogger
             catch { return false; }
         }
 
-        // Devビルドで一時的にinfoを開放する
-        private static void ForceInfoLoggingForDev()
-        {
-#if DEVELOPMENT_BUILD && !UNITY_EDITOR
-    // Infoログが抑止されていても、このフレームだけは通す
-    UnityEngineDebug.unityLogger.logEnabled = true;
-    UnityEngineDebug.unityLogger.filterLogType = LogType.Log; // すべて許可
-#endif
-        }
+        // --- Verbose出力（Conditional で呼び出し自体をビルドから除外）---
+        [System.Diagnostics.Conditional("NSTL_VERBOSE")]
+        private static void VLog(string message) => UnityEngineDebug.Log(message);
 
-        // ArmOnce の最後でロガー状態を Warning で可視化（デバッグ用）
+        [System.Diagnostics.Conditional("NSTL_VERBOSE")]
+        private static void VWarn(string message) => UnityEngineDebug.LogWarning(message);
+
+        // 武装（1回だけ）
         private static void ArmOnce(string source)
         {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            // 既に武装済みなら何もしない（多重ログ防止）
-            if (sArmed) return;
-            sArmed = true;
+            if (_sArmed) return;
+            _sArmed = true;
 
             Stopwatch.Restart();
-            UnityEngineDebug.Log($"[StartupTimeLogger] armed ({source})");
+            UnityEngineDebug.Log($"[StartupTimeLogger] ARMED src={source}");
 
             var logger = UnityEngineDebug.unityLogger;
-            UnityEngineDebug.Log($"[StartupTimeLogger] logger state: enabled={logger.logEnabled}, filter={logger.filterLogType}");
+            VLog($"[StartupTimeLogger] LOGGER enabled={logger.logEnabled} | filter={logger.filterLogType}");
 #endif
         }
 

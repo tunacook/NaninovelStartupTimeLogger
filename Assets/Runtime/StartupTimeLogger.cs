@@ -80,14 +80,6 @@ namespace NaninovelStartupTimeLogger
         }
 #endif
 
-        private static void ArmOnce(string msg)
-        {
-            if (_armed) return;
-            _armed = true;
-            Stopwatch.Restart();
-            UnityEngineDebug.Log($"{msg} [v{Version}]"); // ここは時間を出さない
-        }
-
         private void Start()
         {
             if (!ShouldRun) { enabled = false; return; }
@@ -183,8 +175,20 @@ namespace NaninovelStartupTimeLogger
         {
             if (endLogged) return;
             endLogged = true;
+
+            // --- ここで info を強制開放 ---
+            ForceInfoLoggingForDev();
+
             var totalMs = Stopwatch.Elapsed.TotalMilliseconds;
-            UnityEngineDebug.Log($"[StartupTimeLogger] {tag} (t={totalMs:F1} ms)");
+            var line = $"[StartupTimeLogger] {tag} (t={totalMs:F1} ms)";
+
+            // 通常の info
+            UnityEngineDebug.Log(line);
+
+#if DEVELOPMENT_BUILD && !UNITY_EDITOR
+    // Devビルドでは、infoが抑止されている環境向けに Warning でも重ねて出す
+    UnityEngineDebug.LogWarning(line + "  [dup: info possibly suppressed]");
+#endif
         }
 
         // --- ヘルパー（1.20 反射フォールバック） ---
@@ -222,6 +226,30 @@ namespace NaninovelStartupTimeLogger
         {
             try { return p != null && p.Playing; }
             catch { return false; }
+        }
+
+        // Devビルドで一時的にinfoを開放する
+        private static void ForceInfoLoggingForDev()
+        {
+#if DEVELOPMENT_BUILD && !UNITY_EDITOR
+    // Infoログが抑止されていても、このフレームだけは通す
+    UnityEngineDebug.unityLogger.logEnabled = true;
+    UnityEngineDebug.unityLogger.filterLogType = LogType.Log; // すべて許可
+#endif
+        }
+
+        // ArmOnce の最後でロガー状態を Warning で可視化（デバッグ用）
+        private static void ArmOnce(string msg)
+        {
+            if (_armed) return;
+            _armed = true;
+            Stopwatch.Restart();
+            UnityEngineDebug.Log($"{msg} [v{Version}]");
+
+#if DEVELOPMENT_BUILD && !UNITY_EDITOR
+    UnityEngineDebug.LogWarning(
+        $"[StartupTimeLogger] logger state: enabled={UnityEngineDebug.unityLogger.logEnabled}, filter={UnityEngineDebug.unityLogger.filterLogType}");
+#endif
         }
 
         private static string Normalize(string raw)

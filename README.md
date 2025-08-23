@@ -30,7 +30,7 @@ Player Settings →（Logging/Diagnostics 相当）で Info（LogType.Log） を
 
 IL2CPP でも動作。[Preserve] を付与済みです（もしストリッピングで消える場合は Managed Stripping Level を下げるか、link.xml を用意してください）。
 
-.asmdefを設定している場合は、StartupTimeLoggerを含めるようにしてください。
+呼び出し側のプロジェクトで.asmdefを設定している場合は、StartupTimeLoggerを含めるようにしてください。
 
 ![](/Documentation~/asmdef.png)
 

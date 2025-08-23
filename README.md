@@ -17,6 +17,10 @@ UPMでGithubリポジトリを指定して追加します。
 
 `git+ssh://git@github.com/tunacook/NaninovelStartupTimeLogger.git`
 
+NaninovelStartupTimeLogger自身もNaninovelを含めているため、Naninovelのupmを使える状態にしてください。
+
+https://naninovel.com/guide/getting-started#install-from-github
+
 
 ## ビルド条件
 

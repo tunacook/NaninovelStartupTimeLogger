@@ -175,19 +175,11 @@ namespace NaninovelStartupTimeLogger
         {
             if (endLogged) return;
             endLogged = true;
-
-            // --- ここで info を強制開放 ---
-            ForceInfoLoggingForDev();
-
-            var totalMs = Stopwatch.Elapsed.TotalMilliseconds;
-            var line = $"[StartupTimeLogger] {tag} (t={totalMs:F1} ms)";
-
-            // 通常の info
+            var ms = Stopwatch.Elapsed.TotalMilliseconds;
+            var line = $"[StartupTimeLogger] {tag} (t={ms:F1} ms)";
             UnityEngineDebug.Log(line);
-
 #if DEVELOPMENT_BUILD && !UNITY_EDITOR
-    // Devビルドでは、infoが抑止されている環境向けに Warning でも重ねて出す
-    UnityEngineDebug.LogWarning(line + "  [dup: info possibly suppressed]");
+    UnityEngine.Debug.LogWarning(line + " [dup]");
 #endif
         }
 

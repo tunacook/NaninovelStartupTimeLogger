@@ -5,6 +5,8 @@
 Naninovel プロジェクトの起動（Splash 前）→ initialize 相当の初回スクリプト終了までの経過時間を UnityEngine.Debug.Log（Info）で出力する外部パッケージです。
 プロジェクト側の改変やカスタムコマンドの追加は不要です。
 
+Naninovel製ゲームの起動時間を改善するのに、計測ツールとして使うことを想定しています。
+
 想定：Naninovel 1.20（PlayedScript.ScriptName / PlayedScript.Script.Name を自動判別）
 
 出力：CSV なし、Info ログのみ

@@ -184,7 +184,7 @@ namespace NaninovelStartupTimeLogger
         {
             try
             {
-                var played = p?.PlayedScript;
+                var played = p;
                 if (played == null) return null;
 
                 var t = played.GetType();

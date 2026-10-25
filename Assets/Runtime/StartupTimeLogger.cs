@@ -1,5 +1,7 @@
+using System.Linq;
 using UnityEngine;
 using Naninovel;
+using Naninovel.UI;
 using UnityEngine.Scripting;
 
 #if UNITY_EDITOR
@@ -13,8 +15,9 @@ using UnityEngineDebug = UnityEngine.Debug;
 namespace NaninovelStartupTimeLogger
 {
     /// <summary>
-    /// Splash前(BeforeSplashScreen) → 初回に観測できたスクリプト終了（停止 or 遷移）までを計測。
-    /// 時間は終了時(LogEnd)のみ出力。Editor または Development Build でのみ動作。
+    /// Splash前(BeforeSplashScreen) → 初回に観測できたスクリプト終了（停止 or 遷移）・タイトル表示までを計測。
+    /// 途中の内訳（Naninovel のサービスの初期化・後処理タスク）も 1 つずつ区切って出す。
+    /// 各行の t は起点からの経過ミリ秒、+ は前の行からの経過。Editor または Development Build でのみ動作。
     /// </summary>
     [Preserve] // クラスごと保持（IL2CPP対策）
     public sealed class StartupTimeLogger : MonoBehaviour
@@ -25,9 +28,10 @@ namespace NaninovelStartupTimeLogger
 
         private static readonly SysStopwatch Stopwatch = new SysStopwatch();
         private static volatile bool _sArmed;
+        private static double _sLastMs;
 
         private IScriptPlayer _player;
-        private bool _wasPlaying, _endLogged, _sawInitialize;
+        private bool _wasPlaying, _endLogged, _sawInitialize, _titleDone;
         private string _lastScriptName;
         private string _initScriptId; // 正規化済みの初回スクリプトID
         private float  _readyRealtime;
@@ -98,7 +102,9 @@ namespace NaninovelStartupTimeLogger
             float waitStart = Time.realtimeSinceStartup;
             while (local == null && (Time.realtimeSinceStartup - waitStart) < HardTimeoutSec)
             {
-                try { local = Engine.GetService<IScriptPlayer>(); }
+                // サービスは初期化の途中から取れるが、ready（fastpath の起点）は初期化（UI の生成など）の完了後にする。
+                // 初期化スクリプトは初期化の完了後に再生されるので、これより前に始まることはない
+                try { local = Engine.Initialized ? Engine.GetService<IScriptPlayer>() : null; }
                 catch { /* 初期化前 */ }
                 yield return null;
             }
@@ -107,23 +113,45 @@ namespace NaninovelStartupTimeLogger
 
             _player        = local;
             _readyRealtime = Time.realtimeSinceStartup;
-            UnityEngineDebug.Log("[StartupTimeLogger] Naninovel Engine ready."); // 時間は出さない
+            Mark("engine_ready");
 
             // 監視ループ（EndOfFrame ダブルチェックで取りこぼし低減）
-            while (!_endLogged)
+            while (!_endLogged || !_titleDone)
             {
                 TickDetection();
+                TickTitle();
 
                 yield return new WaitForEndOfFrame();
-                if (_endLogged) yield break;
+                if (_endLogged && _titleDone) yield break;
 
                 TickDetection();
+                TickTitle();
                 yield return null;
+            }
+        }
+
+        private void TickTitle()
+        {
+            if (_titleDone || !Engine.Initialized) return;
+
+            var title = Engine.GetService<IUIManager>()?.GetUI<ITitleUI>();
+            if (title is { Visible: true })
+            {
+                _titleDone = true;
+                Mark("title_ui_visible");
+            }
+            // タイトルを経ずに始まる経路（初期化スクリプトから本編へ進むなど）では見張り続けない
+            else if (Time.realtimeSinceStartup - _readyRealtime >= HardTimeoutSec)
+            {
+                _titleDone = true;
+                Mark("title_ui_not_shown_timeout");
             }
         }
 
         private void TickDetection()
         {
+            if (_endLogged) return;
+
             var elapsedSinceReady = Time.realtimeSinceStartup - _readyRealtime;
 
             var currentName = SafeGetPlayedScriptName(_player);
@@ -174,10 +202,35 @@ namespace NaninovelStartupTimeLogger
         {
             if (_endLogged) return;
             _endLogged = true;
-
-            var ms = Stopwatch.Elapsed.TotalMilliseconds;
-            UnityEngineDebug.Log($"[StartupTimeLogger] {tag} (t={ms:F1} ms)");
+            Mark(tag);
         }
+
+        /// <summary>起点からの経過ms（t）と前の行からの経過ms（+）を付けて出力。</summary>
+        private static void Mark(string label)
+        {
+            var ms = Stopwatch.Elapsed.TotalMilliseconds;
+            UnityEngineDebug.Log($"[StartupTimeLogger] t={ms,8:F1}ms (+{ms - _sLastMs,7:F1}) {label}");
+            _sLastMs = ms;
+        }
+
+        // ---- Naninovel のエンジン初期化の内訳 ----
+        private static void HandleInitializationStarted() => Mark("engine_initialize_start");
+
+        private static void HandleInitializationProgress(float progress)
+        {
+            // Engine.Initialize の進捗: 0〜.25 前処理、.25〜.75 サービスの InitializeService、.75〜1 後処理タスク（UI の生成など）
+            if (progress < .25f) Mark($"pre_init_task (progress {progress:F3})");
+            else if (progress < .75f)
+            {
+                var services = Engine.Services;
+                var index = Mathf.RoundToInt((progress - .25f) / .5f * services.Count);
+                var name = index < services.Count ? services.ElementAt(index).GetType().Name : "?";
+                Mark($"initialize_service {name}");
+            }
+            else Mark($"post_init_task (progress {progress:F3})");
+        }
+
+        private static void HandleInitializationFinished() => Mark("engine_initialize_finished");
 
         // --- ヘルパー（1.20 反射フォールバック） ---
         private static string SafeGetPlayedScriptName(IScriptPlayer p)
@@ -225,7 +278,16 @@ namespace NaninovelStartupTimeLogger
             _sArmed = true;
 
             Stopwatch.Restart();
+            _sLastMs = 0;
             UnityEngineDebug.Log($"[StartupTimeLogger] armed ({source})");
+
+            // ドメインリロード無効の Editor でも二重に購読しないよう、外してから付ける
+            Engine.OnInitializationStarted  -= HandleInitializationStarted;
+            Engine.OnInitializationStarted  += HandleInitializationStarted;
+            Engine.OnInitializationProgress -= HandleInitializationProgress;
+            Engine.OnInitializationProgress += HandleInitializationProgress;
+            Engine.OnInitializationFinished -= HandleInitializationFinished;
+            Engine.OnInitializationFinished += HandleInitializationFinished;
 
             var logger = UnityEngineDebug.unityLogger;
             UnityEngineDebug.Log($"[StartupTimeLogger] logger state: enabled={logger.logEnabled}, filter={logger.filterLogType}");
